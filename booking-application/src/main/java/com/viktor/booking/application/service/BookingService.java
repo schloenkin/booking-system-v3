@@ -188,17 +188,7 @@ public class BookingService {
 
         Booking savedBooking = bookingRepository.save(booking);
 
-        TransactionSynchronizationManager.registerSynchronization(
-                new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        availabilityCache.evict(
-                                serviceId,
-                                startTime.toLocalDate()
-                        );
-                    }
-                }
-        );
+        evictAvailabilityAfterCommit(serviceId, startTime.toLocalDate());
 
         return savedBooking;
     }
@@ -211,16 +201,9 @@ public class BookingService {
 
                     bookingRepository.deleteById(id);
 
-                    TransactionSynchronizationManager.registerSynchronization(
-                            new TransactionSynchronization() {
-                                @Override
-                                public void afterCommit() {
-                                    availabilityCache.evict(
-                                            booking.getServiceId(),
-                                            booking.getStartTime().toLocalDate()
-                                    );
-                                }
-                            }
+                    evictAvailabilityAfterCommit(
+                            booking.getServiceId(),
+                            booking.getStartTime().toLocalDate()
                     );
 
                     return true;
@@ -241,16 +224,9 @@ public class BookingService {
                             bookingRepository.update(existingBooking);
 
                     if (updatedBooking.isPresent()) {
-                        TransactionSynchronizationManager.registerSynchronization(
-                                new TransactionSynchronization() {
-                                    @Override
-                                    public void afterCommit() {
-                                        availabilityCache.evict(
-                                                existingBooking.getServiceId(),
-                                                existingBooking.getStartTime().toLocalDate()
-                                        );
-                                    }
-                                }
+                        evictAvailabilityAfterCommit(
+                                existingBooking.getServiceId(),
+                                existingBooking.getStartTime().toLocalDate()
                         );
                     }
 
@@ -312,23 +288,37 @@ public class BookingService {
                     Optional<Booking> updatedBooking =
                             bookingRepository.update(existingBooking);
 
-                    if (updatedBooking.isPresent()) {
-                        TransactionSynchronizationManager.registerSynchronization(
-                                new TransactionSynchronization() {
-                                    @Override
-                                    public void afterCommit() {
-                                        availabilityCache.evict(serviceId, oldDate);
 
-                                        if (!oldDate.equals(newDate)) {
-                                            availabilityCache.evict(serviceId, newDate);
-                                        }
-                                    }
-                                }
-                        );
+                    if (updatedBooking.isPresent()) {
+                        evictAvailabilityAfterCommit(serviceId, oldDate);
+
+                        if (!oldDate.equals(newDate)) {
+                            evictAvailabilityAfterCommit(serviceId, newDate);
+                        }
                     }
 
                     return updatedBooking;
 
                 });
     }
+
+
+    private void evictAvailabilityAfterCommit(
+            Long serviceId,
+            LocalDate date
+    ) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        availabilityCache.evict(serviceId, date);
+                    }
+                }
+        );
+    }
+
 }

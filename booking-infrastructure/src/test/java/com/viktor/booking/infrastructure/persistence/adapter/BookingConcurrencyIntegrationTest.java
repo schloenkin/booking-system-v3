@@ -50,6 +50,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import com.viktor.booking.application.cache.AvailabilityCache;
+import org.mockito.Mockito;
+import org.springframework.context.annotation.Bean;
+
 
 @DataJpaTest
 @Testcontainers
@@ -262,5 +266,9 @@ class BookingConcurrencyIntegrationTest {
             BookableServiceMapper.class
     })
     static class TestConfiguration {
+        @Bean
+        AvailabilityCache availabilityCache() {
+            return Mockito.mock(AvailabilityCache.class);
+        }
     }
 }

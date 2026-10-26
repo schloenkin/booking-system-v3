@@ -1,5 +1,6 @@
 package com.viktor.booking.infrastructure.persistence.adapter;
 
+import com.viktor.booking.application.cache.AvailabilityCache;
 import com.viktor.booking.application.repository.BookableServiceRepository;
 import com.viktor.booking.application.repository.BookingRepository;
 import com.viktor.booking.application.repository.UserRepository;
@@ -20,12 +21,14 @@ import com.viktor.booking.infrastructure.persistence.repository.BookingJpaReposi
 import com.viktor.booking.infrastructure.persistence.repository.UserJpaRepository;
 import jakarta.persistence.OptimisticLockException;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -346,5 +349,9 @@ class BookingStatusConcurrencyIntegrationTest {
             BookableServiceMapper.class
     })
     static class TestConfiguration {
+        @Bean
+        AvailabilityCache availabilityCache() {
+            return Mockito.mock(AvailabilityCache.class);
+        }
     }
 }
