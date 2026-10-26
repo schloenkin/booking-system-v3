@@ -6,6 +6,7 @@ import com.viktor.booking.application.query.AvailabilitySlot;
 import com.viktor.booking.application.repository.BookingRepository;
 import com.viktor.booking.domain.model.BookableService;
 import com.viktor.booking.domain.policy.BookingSchedulePolicy;
+import com.viktor.booking.application.cache.AvailabilityCache;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,16 +33,19 @@ public class BookingAvailabilityService {
 
     private final BookableServiceService serviceService;
     private final BookingRepository bookingRepository;
+    private final AvailabilityCache availabilityCache;
 
     private final BookingSchedulePolicy schedulePolicy =
             new BookingSchedulePolicy();
 
     public BookingAvailabilityService(
             BookableServiceService serviceService,
-            BookingRepository bookingRepository
+            BookingRepository bookingRepository,
+            AvailabilityCache availabilityCache
     ) {
         this.serviceService = serviceService;
         this.bookingRepository = bookingRepository;
+        this.availabilityCache = availabilityCache;
     }
 
     @Transactional(readOnly = true)

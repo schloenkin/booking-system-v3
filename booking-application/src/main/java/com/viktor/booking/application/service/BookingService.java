@@ -16,12 +16,15 @@ import com.viktor.booking.application.exception.InvalidBookingDurationException;
 import com.viktor.booking.domain.exception.BookingInPastException;
 import com.viktor.booking.application.exception.BookingTimeConflictException;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import com.viktor.booking.application.exception.InvalidBookingSearchException;
 import com.viktor.booking.application.query.BookingSearchCriteria;
 import com.viktor.booking.application.query.PageRequestData;
 import com.viktor.booking.application.query.PageResult;
 import com.viktor.booking.domain.policy.BookingSchedulePolicy;
 import com.viktor.booking.domain.exception.InvalidBookingScheduleException;
+import com.viktor.booking.application.cache.AvailabilityCache;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -49,15 +52,18 @@ public class BookingService {
     private final BookableServiceRepository serviceRepository;
     private final BookingSchedulePolicy bookingSchedulePolicy =
             new BookingSchedulePolicy(); // at the moment it goes without DI. Later we can correct it.
+    private final AvailabilityCache availabilityCache;
 
     public BookingService(
             BookingRepository bookingRepository,
             UserRepository userRepository,
-            BookableServiceRepository serviceRepository
+            BookableServiceRepository serviceRepository,
+            AvailabilityCache availabilityCache
     ) {
         this.bookingRepository = bookingRepository;
         this.userRepository = userRepository;
         this.serviceRepository = serviceRepository;
+        this.availabilityCache = availabilityCache;
     }
 
     public List<Booking> getAllBookings() {
@@ -180,7 +186,21 @@ public class BookingService {
             throw new BookingTimeConflictException(serviceId);
         }
 
-        return bookingRepository.save(booking);
+        Booking savedBooking = bookingRepository.save(booking);
+
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        availabilityCache.evict(
+                                serviceId,
+                                startTime.toLocalDate()
+                        );
+                    }
+                }
+        );
+
+        return savedBooking;
     }
 
     @Transactional
@@ -188,7 +208,21 @@ public class BookingService {
         return bookingRepository.findById(id)
                 .map(booking -> {
                     booking.ensureCanBeDeleted();
+
                     bookingRepository.deleteById(id);
+
+                    TransactionSynchronizationManager.registerSynchronization(
+                            new TransactionSynchronization() {
+                                @Override
+                                public void afterCommit() {
+                                    availabilityCache.evict(
+                                            booking.getServiceId(),
+                                            booking.getStartTime().toLocalDate()
+                                    );
+                                }
+                            }
+                    );
+
                     return true;
                 })
                 .orElse(
@@ -200,8 +234,27 @@ public class BookingService {
     public Optional<Booking> cancelBookingById(Long id) {
         return bookingRepository.findById(id)
                 .flatMap(existingBooking -> {
+
                     existingBooking.cancel();
-                    return bookingRepository.update(existingBooking);
+
+                    Optional<Booking> updatedBooking =
+                            bookingRepository.update(existingBooking);
+
+                    if (updatedBooking.isPresent()) {
+                        TransactionSynchronizationManager.registerSynchronization(
+                                new TransactionSynchronization() {
+                                    @Override
+                                    public void afterCommit() {
+                                        availabilityCache.evict(
+                                                existingBooking.getServiceId(),
+                                                existingBooking.getStartTime().toLocalDate()
+                                        );
+                                    }
+                                }
+                        );
+                    }
+
+                    return updatedBooking;
                 });
     }
 
@@ -245,13 +298,37 @@ public class BookingService {
                         );
                     }
 
+                    Long serviceId = existingBooking.getServiceId();
+
+                    // Here we are keeping the old structure BEFORE changing the booking
+                    LocalDate oldDate = existingBooking.getStartTime().toLocalDate();
+                    LocalDate newDate = newStartTime.toLocalDate();
+
                     existingBooking.reschedule(
                             newStartTime,
                             newEndTime
                     );
 
-                    return bookingRepository.update(
-                            existingBooking);
+                    Optional<Booking> updatedBooking =
+                            bookingRepository.update(existingBooking);
+
+                    if (updatedBooking.isPresent()) {
+                        TransactionSynchronizationManager.registerSynchronization(
+                                new TransactionSynchronization() {
+                                    @Override
+                                    public void afterCommit() {
+                                        availabilityCache.evict(serviceId, oldDate);
+
+                                        if (!oldDate.equals(newDate)) {
+                                            availabilityCache.evict(serviceId, newDate);
+                                        }
+                                    }
+                                }
+                        );
+                    }
+
+                    return updatedBooking;
+
                 });
     }
 }
