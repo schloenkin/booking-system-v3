@@ -37,3 +37,5 @@ USER booking
 EXPOSE 8080
 
 ENTRYPOINT ["java", "-jar", "/app/booking-api.jar"]
+
+LABEL org.opencontainers.image.source="https://github.com/schloenkin/booking-system-v3"
