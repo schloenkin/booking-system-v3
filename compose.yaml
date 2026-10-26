@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:17
-    container_name: booking-postgres
+    container_name: booking-v3-postgres
 
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 
     ports:
-      - "5433:5432"
+      - "5435:5432"
 
     volumes:
       - booking_postgres_data:/var/lib/postgresql/data
@@ -21,10 +21,23 @@ services:
       retries: 10
       start_period: 10s
 
-  booking-api:
-    image: ghcr.io/schloenkin/booking-system-v2:6ddf99124393aa6b89f6e397e5b2c5bc903163ec
+  redis:
+    image: redis:7-alpine
+    container_name: booking-v3-redis
 
-    container_name: booking-api
+    ports:
+      - "6380:6379"
+
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  booking-api:
+    image: ghcr.io/schloenkin/booking-system-v3:${IMAGE_TAG}
+
+    container_name: booking-v3-api
 
     environment:
       POSTGRES_HOST: postgres
@@ -37,7 +50,7 @@ services:
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-3600000}
 
     ports:
-      - "8080:8080"
+      - "8081:8080"
 
     healthcheck:
       test: [ "CMD-SHELL", "wget -qO- http://localhost:8080/api/health > /dev/null 2>&1 || exit 1" ]
