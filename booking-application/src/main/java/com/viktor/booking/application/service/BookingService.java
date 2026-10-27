@@ -15,16 +15,14 @@ import com.viktor.booking.domain.model.BookableService;
 import com.viktor.booking.application.exception.InvalidBookingDurationException;
 import com.viktor.booking.domain.exception.BookingInPastException;
 import com.viktor.booking.application.exception.BookingTimeConflictException;
+import com.viktor.booking.application.cache.AvailabilityCacheInvalidator;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import com.viktor.booking.application.exception.InvalidBookingSearchException;
 import com.viktor.booking.application.query.BookingSearchCriteria;
 import com.viktor.booking.application.query.PageRequestData;
 import com.viktor.booking.application.query.PageResult;
 import com.viktor.booking.domain.policy.BookingSchedulePolicy;
 import com.viktor.booking.domain.exception.InvalidBookingScheduleException;
-import com.viktor.booking.application.cache.AvailabilityCache;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -52,18 +50,18 @@ public class BookingService {
     private final BookableServiceRepository serviceRepository;
     private final BookingSchedulePolicy bookingSchedulePolicy =
             new BookingSchedulePolicy(); // at the moment it goes without DI. Later we can correct it.
-    private final AvailabilityCache availabilityCache;
+    private final AvailabilityCacheInvalidator cacheInvalidator;
 
     public BookingService(
             BookingRepository bookingRepository,
             UserRepository userRepository,
             BookableServiceRepository serviceRepository,
-            AvailabilityCache availabilityCache
+            AvailabilityCacheInvalidator cacheInvalidator
     ) {
         this.bookingRepository = bookingRepository;
         this.userRepository = userRepository;
         this.serviceRepository = serviceRepository;
-        this.availabilityCache = availabilityCache;
+        this.cacheInvalidator = cacheInvalidator;
     }
 
     public List<Booking> getAllBookings() {
@@ -307,18 +305,8 @@ public class BookingService {
             Long serviceId,
             LocalDate date
     ) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            return;
-        }
-
-        TransactionSynchronizationManager.registerSynchronization(
-                new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        availabilityCache.evict(serviceId, date);
-                    }
-                }
-        );
+        cacheInvalidator.evictAfterCommit(serviceId, date);
     }
+
 
 }

@@ -1,6 +1,5 @@
 package com.viktor.booking.infrastructure.persistence.adapter;
 
-import com.viktor.booking.application.cache.AvailabilityCache;
 import com.viktor.booking.application.repository.BookableServiceRepository;
 import com.viktor.booking.application.repository.BookingRepository;
 import com.viktor.booking.application.repository.UserRepository;
@@ -19,6 +18,8 @@ import com.viktor.booking.infrastructure.persistence.mapper.UserMapper;
 import com.viktor.booking.infrastructure.persistence.repository.BookableServiceJpaRepository;
 import com.viktor.booking.infrastructure.persistence.repository.BookingJpaRepository;
 import com.viktor.booking.infrastructure.persistence.repository.UserJpaRepository;
+import com.viktor.booking.application.cache.AvailabilityCacheInvalidator;
+
 import jakarta.persistence.OptimisticLockException;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -350,8 +351,8 @@ class BookingStatusConcurrencyIntegrationTest {
     })
     static class TestConfiguration {
         @Bean
-        AvailabilityCache availabilityCache() {
-            return Mockito.mock(AvailabilityCache.class);
+        AvailabilityCacheInvalidator availabilityCacheInvalidator() {
+            return Mockito.mock(AvailabilityCacheInvalidator.class);
         }
     }
 }

@@ -36,6 +36,7 @@ import com.viktor.booking.application.exception.InvalidBookingSearchException;
 import com.viktor.booking.application.query.BookingSearchCriteria;
 import com.viktor.booking.application.query.PageRequestData;
 import com.viktor.booking.application.query.PageResult;
+import com.viktor.booking.application.cache.AvailabilityCacheInvalidator;
 
 import java.time.LocalDateTime;
 
@@ -58,6 +59,9 @@ class BookingServiceTest {
 
     @Mock
     private BookableServiceRepository serviceRepository;
+
+    @Mock
+    private AvailabilityCacheInvalidator cacheInvalidator;
 
     @InjectMocks
     private BookingService bookingService;
