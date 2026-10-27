@@ -10,12 +10,16 @@ import com.viktor.booking.application.cache.AvailabilityCache;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class BookingAvailabilityService {
@@ -37,6 +41,9 @@ public class BookingAvailabilityService {
 
     private final BookingSchedulePolicy schedulePolicy =
             new BookingSchedulePolicy();
+
+    private static final Logger log =
+            LoggerFactory.getLogger(BookingAvailabilityService.class);
 
     public BookingAvailabilityService(
             BookableServiceService serviceService,
@@ -62,6 +69,24 @@ public class BookingAvailabilityService {
         if (!service.isActive()) {
             throw new InactiveBookableServiceException(serviceId);
         }
+
+        try {
+            Optional<List<AvailabilitySlot>> cachedSlots =
+                    availabilityCache.get(serviceId, date);
+
+            if (cachedSlots.isPresent()) {
+                return cachedSlots.get();
+            }
+
+        } catch (RuntimeException ex) {
+            log.warn(
+                    "Availability cache read failed. Falling back to database. serviceId={}, date={}",
+                    serviceId,
+                    date,
+                    ex
+            );
+        }
+
 
         LocalDate today = LocalDate.now(BUSINESS_ZONE);
 
@@ -103,6 +128,17 @@ public class BookingAvailabilityService {
 
             slotTime = slotTime.plusMinutes(
                     SLOT_STEP_MINUTES
+            );
+        }
+
+        try {
+            availabilityCache.put(serviceId, date, slots);
+        } catch (RuntimeException ex) {
+            log.warn(
+                    "Availability cache write failed. Returning calculated availability. serviceId={}, date={}",
+                    serviceId,
+                    date,
+                    ex
             );
         }
 
