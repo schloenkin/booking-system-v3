@@ -30,6 +30,12 @@ public interface BookingRepository {
             LocalDateTime endTime
     );
 
+    List<Booking> findOverlappingBookings(
+            Long serviceId,
+            LocalDateTime startTime,
+            LocalDateTime endTime
+    );
+
     boolean existsConflictingBookingExcludingId(
             Long bookingId,
             Long serviceId,

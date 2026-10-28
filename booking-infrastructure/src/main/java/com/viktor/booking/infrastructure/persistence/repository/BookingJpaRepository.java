@@ -29,4 +29,12 @@ public interface BookingJpaRepository
             LocalDateTime endTime,
             LocalDateTime startTime
     );
+
+    List<BookingEntity>
+    findByService_IdAndStatusNotAndStartTimeLessThanAndEndTimeGreaterThan(
+            Long serviceId,
+            BookingStatus excludedStatus,
+            LocalDateTime endTime,
+            LocalDateTime startTime
+    );
 }

@@ -2,6 +2,7 @@ package com.viktor.booking.application.service;
 
 import com.viktor.booking.application.cache.AvailabilityCache;
 import com.viktor.booking.application.repository.BookingRepository;
+import com.viktor.booking.domain.model.Booking;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -18,6 +19,12 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
 
 
 @ExtendWith(MockitoExtension.class)
@@ -63,9 +70,15 @@ class BookingAvailabilityServiceTest {
         assertFalse(slots.get(8).available());
         assertFalse(slots.get(9).available());
 
-        verify(bookingRepository, times(16))
-                .existsConflictingBooking(
+        verify(bookingRepository, times(1))
+                .findOverlappingBookings(
                         eq(serviceId),
+                        any(LocalDateTime.class),
+                        any(LocalDateTime.class)
+                );
+        verify(bookingRepository, never())
+                .existsConflictingBooking(
+                        anyLong(),
                         any(LocalDateTime.class),
                         any(LocalDateTime.class)
                 );
@@ -99,18 +112,16 @@ class BookingAvailabilityServiceTest {
 
         LocalDateTime bookedEnd = bookedStart.plusMinutes(30);
 
-        when(bookingRepository.existsConflictingBooking(
+        Booking existingBooking = mock(Booking.class);
+
+        when(existingBooking.getStartTime()).thenReturn(bookedStart);
+        when(existingBooking.getEndTime()).thenReturn(bookedEnd);
+
+        when(bookingRepository.findOverlappingBookings(
                 eq(serviceId),
                 any(LocalDateTime.class),
                 any(LocalDateTime.class)
-        )).thenAnswer(invocation -> {
-
-            LocalDateTime start = invocation.getArgument(1);
-            LocalDateTime end = invocation.getArgument(2);
-
-            return start.equals(bookedStart)
-                    && end.equals(bookedEnd);
-        });
+        )).thenReturn(List.of(existingBooking));
 
         List<AvailabilitySlot> slots =
                 bookingAvailabilityService.getAvailability(serviceId, date);
@@ -122,11 +133,19 @@ class BookingAvailabilityServiceTest {
 
         assertFalse(bookedSlot.available());
 
-        verify(bookingRepository).existsConflictingBooking(
-                serviceId,
-                bookedStart,
-                bookedEnd
-        );
+        verify(bookingRepository, times(1))
+                .findOverlappingBookings(
+                        eq(serviceId),
+                        any(LocalDateTime.class),
+                        any(LocalDateTime.class)
+                );
+
+        verify(bookingRepository, never())
+                .existsConflictingBooking(
+                        anyLong(),
+                        any(LocalDateTime.class),
+                        any(LocalDateTime.class)
+                );
 
         verify(availabilityCache, times(1)).get(serviceId, date);
     }
@@ -155,9 +174,16 @@ class BookingAvailabilityServiceTest {
 
         assertEquals(18, slots.size());
 
-        verify(bookingRepository, times(16))
-                .existsConflictingBooking(
+        verify(bookingRepository, times(1))
+                .findOverlappingBookings(
                         eq(serviceId),
+                        any(LocalDateTime.class),
+                        any(LocalDateTime.class)
+                );
+
+        verify(bookingRepository, never())
+                .existsConflictingBooking(
+                        anyLong(),
                         any(LocalDateTime.class),
                         any(LocalDateTime.class)
                 );
@@ -223,13 +249,206 @@ class BookingAvailabilityServiceTest {
         verify(availabilityCache).get(serviceId, date);
         verify(availabilityCache).put(eq(serviceId), eq(date), eq(slots));
 
-        verify(bookingRepository, times(16))
-                .existsConflictingBooking(
+        verify(bookingRepository, times(1))
+                .findOverlappingBookings(
                         eq(serviceId),
+                        any(LocalDateTime.class),
+                        any(LocalDateTime.class)
+                );
+
+        verify(bookingRepository, never())
+                .existsConflictingBooking(
+                        anyLong(),
                         any(LocalDateTime.class),
                         any(LocalDateTime.class)
                 );
     }
 
+    @Test
+    void shouldBlockTwoSlotsForOneHourBooking() {
+        Long serviceId = 1L;
+
+        LocalDate date = LocalDate.now(ZoneId.of("Europe/Berlin"))
+                .with(TemporalAdjusters.next(DayOfWeek.MONDAY));
+
+        BookableService service = mock(BookableService.class);
+
+        when(service.isActive()).thenReturn(true);
+        when(service.getDurationMinutes()).thenReturn(30);
+
+        when(serviceService.getServiceById(serviceId))
+                .thenReturn(Optional.of(service));
+
+        Booking existingBooking = mock(Booking.class);
+
+        LocalDateTime bookedStart = LocalDateTime.of(
+                date, LocalTime.of(10, 0)
+        );
+
+        LocalDateTime bookedEnd = LocalDateTime.of(
+                date, LocalTime.of(11, 0)
+        );
+
+        when(existingBooking.getStartTime()).thenReturn(bookedStart);
+        when(existingBooking.getEndTime()).thenReturn(bookedEnd);
+
+        when(bookingRepository.findOverlappingBookings(
+                eq(serviceId),
+                any(LocalDateTime.class),
+                any(LocalDateTime.class)
+        )).thenReturn(List.of(existingBooking));
+
+        List<AvailabilitySlot> slots =
+                bookingAvailabilityService.getAvailability(serviceId, date);
+
+        assertFalse(findSlot(slots, LocalTime.of(10, 0)).available());
+        assertFalse(findSlot(slots, LocalTime.of(10, 30)).available());
+
+        assertTrue(findSlot(slots, LocalTime.of(9, 30)).available());
+        assertTrue(findSlot(slots, LocalTime.of(11, 0)).available());
+
+        verify(bookingRepository, times(1))
+                .findOverlappingBookings(
+                        eq(serviceId),
+                        eq(date.atStartOfDay()),
+                        eq(date.plusDays(1).atStartOfDay())
+                );
+
+        verify(bookingRepository, never())
+                .existsConflictingBooking(
+                        anyLong(),
+                        any(LocalDateTime.class),
+                        any(LocalDateTime.class)
+                );
+    }
+
+    private AvailabilitySlot findSlot(
+            List<AvailabilitySlot> slots,
+            LocalTime time
+    ) {
+        return slots.stream()
+                .filter(slot -> slot.time().equals(time))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    @Test
+    void shouldDemonstrateStaleCacheWriteAfterConcurrentEviction()
+            throws Exception {
+
+        Long serviceId = 1L;
+
+        LocalDate date = LocalDate.now(ZoneId.of("Europe/Berlin"))
+                .with(TemporalAdjusters.next(DayOfWeek.MONDAY));
+
+        BookableService service = mock(BookableService.class);
+
+        when(service.isActive()).thenReturn(true);
+        when(service.getDurationMinutes()).thenReturn(30);
+
+        when(serviceService.getServiceById(serviceId))
+                .thenReturn(Optional.of(service));
+
+        AtomicReference<List<AvailabilitySlot>> cache =
+                new AtomicReference<>();
+
+        when(availabilityCache.get(serviceId, date))
+                .thenAnswer(invocation ->
+                        Optional.ofNullable(cache.get())
+                );
+
+        doAnswer(invocation -> {
+            List<AvailabilitySlot> slots = invocation.getArgument(2);
+            cache.set(slots);
+            return null;
+        }).when(availabilityCache).put(
+                eq(serviceId),
+                eq(date),
+                anyList()
+        );
+
+        doAnswer(invocation -> {
+            cache.set(null);
+            return null;
+        }).when(availabilityCache).evict(serviceId, date);
+
+        CountDownLatch databaseReadStarted = new CountDownLatch(1);
+        CountDownLatch allowCalculationToContinue = new CountDownLatch(1);
+
+        when(bookingRepository.findOverlappingBookings(
+                eq(serviceId),
+                any(LocalDateTime.class),
+                any(LocalDateTime.class)
+        )).thenAnswer(invocation -> {
+
+            // Simulate an old database snapshot.
+            databaseReadStarted.countDown();
+
+            if (!allowCalculationToContinue.await(
+                    5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Timed out waiting for test");
+            }
+
+            return List.of();
+        });
+
+        CompletableFuture<List<AvailabilitySlot>> request =
+                CompletableFuture.supplyAsync(() ->
+                        bookingAvailabilityService.getAvailability(
+                                serviceId, date
+                        )
+                );
+
+        try {
+            assertTrue(databaseReadStarted.await(
+                    5, TimeUnit.SECONDS
+            ));
+
+            // Another transaction commits and invalidates the cache.
+            availabilityCache.evict(serviceId, date);
+
+        } finally {
+            allowCalculationToContinue.countDown();
+        }
+
+        request.get(5, TimeUnit.SECONDS);
+
+            // Known limitation:
+            // An in-flight calculation can repopulate the cache
+            // with stale availability after eviction.
+            // Redis TTL limits the duration of this inconsistency.
+        assertNotNull(cache.get());
+
+    }
+
+    @Test
+    void shouldNotReturnCachedSlotsForToday() {
+        Long serviceId = 1L;
+
+        LocalDate today = LocalDate.now(
+                ZoneId.of("Europe/Berlin")
+        );
+
+        BookableService service = mock(BookableService.class);
+
+        when(service.isActive()).thenReturn(true);
+
+        when(serviceService.getServiceById(serviceId))
+                .thenReturn(Optional.of(service));
+
+        List<AvailabilitySlot> slots =
+                bookingAvailabilityService.getAvailability(
+                        serviceId,
+                        today
+                );
+
+        assertEquals(18, slots.size());
+
+        assertTrue(slots.stream()
+                .noneMatch(AvailabilitySlot::available));
+
+        verifyNoInteractions(availabilityCache);
+        verifyNoInteractions(bookingRepository);
+    }
 
 }

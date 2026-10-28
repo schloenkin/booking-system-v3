@@ -166,6 +166,22 @@ public class JpaBookingRepositoryAdapter implements BookingRepository {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public List<Booking> findOverlappingBookings(
+            Long serviceId,
+            LocalDateTime startTime,
+            LocalDateTime endTime) {
+        return bookingJpaRepository.findByService_IdAndStatusNotAndStartTimeLessThanAndEndTimeGreaterThan(
+                        serviceId,
+                        BookingStatus.CANCELLED,
+                        endTime,
+                        startTime)
+                .stream()
+                .map(bookingMapper::toDomain)
+                .toList();
+    }
+
+    @Override
     public Booking save(Booking booking) {
         UserEntity userEntity = userJpaRepository
                 .findById(booking.getUserId())

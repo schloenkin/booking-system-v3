@@ -5,6 +5,7 @@ import com.viktor.booking.application.exception.InactiveBookableServiceException
 import com.viktor.booking.application.query.AvailabilitySlot;
 import com.viktor.booking.application.repository.BookingRepository;
 import com.viktor.booking.domain.model.BookableService;
+import com.viktor.booking.domain.model.Booking;
 import com.viktor.booking.domain.policy.BookingSchedulePolicy;
 import com.viktor.booking.application.cache.AvailabilityCache;
 import org.springframework.stereotype.Service;
@@ -70,6 +71,12 @@ public class BookingAvailabilityService {
             throw new InactiveBookableServiceException(serviceId);
         }
 
+        LocalDate today = LocalDate.now(BUSINESS_ZONE);
+
+        if (date.isBefore(schedulePolicy.nextWorkingDay(today))) {
+            return createUnavailableSlots();
+        }
+
         try {
             Optional<List<AvailabilitySlot>> cachedSlots =
                     availabilityCache.get(serviceId, date);
@@ -87,8 +94,15 @@ public class BookingAvailabilityService {
             );
         }
 
+        LocalDateTime dayStart = date.atStartOfDay();
+        LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
 
-        LocalDate today = LocalDate.now(BUSINESS_ZONE);
+        List<Booking> existingBookings =
+                bookingRepository.findOverlappingBookings(
+                        serviceId,
+                        dayStart,
+                        dayEnd
+                );
 
         List<AvailabilitySlot> slots = new ArrayList<>();
 
@@ -114,12 +128,13 @@ public class BookingAvailabilityService {
             boolean available = false;
 
             if (validSchedule) {
-                available = !bookingRepository
-                        .existsConflictingBooking(
-                                serviceId,
-                                start,
-                                end
+                boolean hasConflict = existingBookings.stream()
+                        .anyMatch(booking ->
+                                booking.getStartTime().isBefore(end)
+                                        && booking.getEndTime().isAfter(start)
                         );
+
+                available = !hasConflict;
             }
 
             slots.add(
@@ -140,6 +155,18 @@ public class BookingAvailabilityService {
                     date,
                     ex
             );
+        }
+        return slots;
+    }
+    private List<AvailabilitySlot> createUnavailableSlots() {
+        List<AvailabilitySlot> slots = new ArrayList<>();
+
+        LocalTime slotTime = FIRST_SLOT;
+
+        while (slotTime.isBefore(CLOSING)) {
+            slots.add(new AvailabilitySlot(slotTime, false));
+
+            slotTime = slotTime.plusMinutes(SLOT_STEP_MINUTES);
         }
 
         return slots;

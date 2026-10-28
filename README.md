@@ -1,852 +1,320 @@
-# Booking System v2
+# Booking System v3
 
-[![CI](https://github.com/schloenkin/booking-system-v2/actions/workflows/ci.yml/badge.svg)](https://github.com/schloenkin/booking-system-v2/actions/workflows/ci.yml)
+[![CI](https://github.com/schloenkin/booking-system-v3/actions/workflows/ci.yml/badge.svg)](https://github.com/schloenkin/booking-system-v3/actions/workflows/ci.yml)
 
-A production-style backend portfolio project built with Java and Spring Boot.
+**A Java and Spring Boot backend engineering project focused on modular architecture, database performance, caching, concurrency, and system design.**
 
-Booking System v2 provides secure management of users, bookable services, and bookings. The project demonstrates modular architecture, domain-driven business rules, JWT authentication, role-based and object-level authorization, PostgreSQL persistence, database migrations, concurrency control, automated testing, OpenAPI documentation, containerization, CI/CD with GitHub Actions and GHCR, and Kubernetes-based application orchestration.
+## Project Evolution
 
-## Key Features
+Booking System v3 is the continuation and architectural evolution of [Booking System v2](https://github.com/schloenkin/booking-system-v2).
 
-- User registration and login
-- Stateless JWT authentication
-- Role-based authorization with `USER` and `ADMIN`
-- Ownership-based access control for bookings
-- Bookable service management
-- Booking creation, search, filtering, sorting, and pagination
-- Controlled booking status transitions
-- PostgreSQL persistence through Spring Data JPA
-- Flyway database migrations
-- Optimistic locking for concurrent booking updates
-- Unified API error contract with stable machine-readable error codes
-- OpenAPI 3 documentation with Swagger UI and JWT authorization
-- Unit, controller, security, integration, and concurrency tests
-- PostgreSQL integration tests with Testcontainers
-- Multi-stage Docker image
-- Docker Compose runtime for the application and PostgreSQL
-- Docker image publishing to GitHub Container Registry (GHCR)
-- GitHub Actions CI for Maven verification and Docker image builds
-- Automated Docker Compose deployment through a separate deployment repository and self-hosted runner
-- Kubernetes deployment for the Booking API and PostgreSQL
-- Kubernetes Services for application and database networking
-- Externalized Kubernetes configuration with ConfigMap and Secret
-- Persistent PostgreSQL storage with PersistentVolumeClaim
-- Readiness and liveness probes for the Booking API
-- Kubernetes rolling updates verified in a local cluster
+Version 2 established the foundation of the booking platform, including REST APIs, JWT authentication, role-based authorization, PostgreSQL persistence, automated testing, Docker, CI/CD, and local Kubernetes deployment.
 
-## Technology Stack
+Version 3 builds upon that experience with a stronger focus on backend performance, caching, concurrency, and maintainable application architecture.
 
-- Java 17
-- Spring Boot 3.5.14
-- Spring Web
-- Spring Security
-- JWT with JJWT 0.13.0
-- Spring Data JPA
-- PostgreSQL 17
-- Flyway
-- Springdoc OpenAPI 2.8.17
-- Docker
-- Docker Compose
-- Kubernetes
-- kubectl
-- GitHub Actions
-- GitHub Container Registry (GHCR)
-- Swagger UI
-- Maven
-- JUnit 5
-- Mockito
-- MockMvc
-- Testcontainers
+## What v3 adds
+
+- Availability calculation for a selected service and date.
+- A business scheduling policy covering working days, next-working-day booking, opening hours and lunch breaks.
+- Redis Cache-Aside for availability responses, using a 30-second time-to-live (TTL).
+- Transaction-aware cache invalidation **after a successful database commit**.
+- Graceful fallback to PostgreSQL when Redis read/write operations fail.
+- One bulk overlapping-bookings query per availability cache miss instead of a database conflict query for each time slot.
+- PostgreSQL integration coverage with Testcontainers, service-level tests with Mockito, and concurrency-focused cache behavior tests.
+
+## Technology stack
+
+| Layer | Technology |
+| --- | --- |
+| Language | Java 17 |
+| Framework | Spring Boot |
+| Build | Maven multi-module project |
+| Persistence | Spring Data JPA / Hibernate, PostgreSQL |
+| Availability cache | Redis via Spring `StringRedisTemplate` |
+| Tests | JUnit 5, Mockito, Testcontainers (PostgreSQL 17 Alpine) |
+| Documentation / API | REST; see the actual v3 controllers and OpenAPI configuration |
+
+The previous v2 project also documented Spring Security, JWT, Flyway, Docker, GitHub Actions, GHCR and Kubernetes. Their **exact configuration and deployment state in v3 must be checked in the current repository**; the v2 deployment history is not automatically a v3 deployment claim.
 
 ## Architecture
 
-The project is organized as a multi-module Maven application:
+The application is organized into four Maven modules:
 
 ```text
-booking-system-v2
-|-- .github
-|   `-- workflows
-|       `-- ci.yml
-|-- booking-domain
-|-- booking-application
-|-- booking-infrastructure
-|-- booking-api
-|-- docs
-|   `-- adr
-|-- .env.example
-|-- Dockerfile
-|-- compose.yaml
-|-- request.http
-|-- README.md
-`-- pom.xml
+booking-system-v3/
+├── booking-domain/          # Business entities and scheduling rules
+├── booking-application/     # Use cases, repository/cache ports
+├── booking-infrastructure/  # JPA adapters, Redis cache, infrastructure
+├── booking-api/             # REST API and Spring Boot configuration
+├── pom.xml
+└── README.md
 ```
 
-Deployment configuration is kept in a separate `booking-system-deploy` repository. It contains the Docker Compose deployment workflow and the Kubernetes manifests used for local orchestration. Keeping deployment configuration separate from application source code makes the build and deployment responsibilities explicit.
+### Responsibilities
 
-### `booking-domain`
+**`booking-domain`** contains booking rules, including `BookingSchedulePolicy`. The domain does not depend on Redis or PostgreSQL.
 
-Contains the core business model and domain rules.
+**`booking-application`** orchestrates use cases such as `BookingService` and `BookingAvailabilityService`. It depends on interfaces such as `BookingRepository`, `AvailabilityCache`, and `AvailabilityCacheInvalidator`, rather than infrastructure details.
 
-Examples:
+**`booking-infrastructure`** implements those interfaces with Spring Data JPA/PostgreSQL and Redis. Relevant implementations include `JpaBookingRepositoryAdapter`, `RedisAvailabilityCache` and `TransactionalAvailabilityCacheInvalidator`.
 
-- `Booking`
-- `BookableService`
-- booking status transitions
-- domain exceptions
-- booking invariants
+**`booking-api`** exposes the REST endpoints and application configuration. The current development configuration uses the `jpa` Spring profile.
 
-The domain module does not depend on Spring, JPA, HTTP, or PostgreSQL.
-
-### `booking-application`
-
-Contains application use cases and repository contracts.
-
-Examples:
-
-- `BookingService`
-- `BookableServiceService`
-- authentication service
-- authorization services and policies
-- search and pagination models
-- repository interfaces
-
-### `booking-infrastructure`
-
-Contains technical implementations.
-
-Examples:
-
-- JPA entities
-- Spring Data repositories
-- repository adapters
-- PostgreSQL persistence
-- Flyway migrations
-- JWT token implementation
-- password hashing
-- in-memory repository implementations
-
-### `booking-api`
-
-Contains the HTTP, documentation, and security entry points.
-
-Examples:
-
-- REST controllers
-- request and response DTOs
-- validation
-- Spring Security configuration
-- JWT authentication filter
-- global exception handling
-- OpenAPI configuration
-- application configuration
-- static demonstration page
-
-## Dependency Direction
-
-The main dependency direction is:
+Dependency direction:
 
 ```text
-booking-api
-     |
-     v
-booking-application
-     |
-     v
-booking-domain
-
-booking-infrastructure
-     |
-     +--> booking-application
-     `--> booking-domain
+booking-api ----------> booking-application ----------> booking-domain
+                              ^                            ^
+                              |                            |
+booking-infrastructure -------+----------------------------+
 ```
 
-Business rules remain inside the domain model, while infrastructure components implement technical concerns such as persistence and JWT handling.
+## Availability and scheduling rules
 
-## Booking Lifecycle
+The scheduling policy currently uses:
 
-A new booking is created with the status:
+| Rule | Value |
+| --- | --- |
+| Business timezone | `Europe/Berlin` |
+| Working days | Monday–Friday |
+| Earliest bookable day | Next working day |
+| Opening time | 09:00 |
+| Lunch interval | 13:00–14:00 |
+| Closing time | 18:00 |
+| Slot start interval | 30 minutes |
+| Booking duration | Derived from the selected service |
 
-```text
-PENDING
-```
+An availability slot is marked unavailable when the schedule policy rejects it or its time interval overlaps an existing non-cancelled booking.
 
-Allowed transitions:
-
-```text
-PENDING   -> CONFIRMED
-PENDING   -> CANCELLED
-CONFIRMED -> CANCELLED
-```
-
-Other transitions are rejected by the domain model.
-
-Examples:
+Interval overlap follows the half-open interval rule:
 
 ```java
-booking.confirm();
-booking.cancel();
+existingBooking.getStartTime().isBefore(candidateEnd)
+    && existingBooking.getEndTime().isAfter(candidateStart)
 ```
 
-A booking may be physically deleted only after it has reached the `CANCELLED` status.
+For example, a booking from **10:00 to 11:00** blocks both 10:00 and 10:30 starts for a 30-minute service. A slot ending exactly at 10:00 does not overlap.
 
-The repository does not decide whether a transition is allowed. It persists the aggregate only after the domain operation has succeeded.
+### Calendar-day validation
 
-Additional architectural reasoning is documented in:
+Before reading Redis, the availability service checks whether the requested date is earlier than the next working day. If so, it returns unavailable slots without consulting Redis or loading bookings. This prevents a cached result calculated shortly before midnight from making a now-disallowed date appear bookable.
 
-[ADR 0001: Booking domain rules and persistence contract](docs/adr/0001-booking-domain-and-persistence-contract.md)
+This check is **not** an atomic guarantee across a midnight boundary for a request that is already in progress.
 
-## Security Model
+## PostgreSQL availability-query optimization
 
-The API uses stateless JWT authentication.
+On a cache miss, the service loads overlapping bookings for the selected calendar day with one repository call:
 
-### Public endpoints
+```java
+LocalDateTime dayStart = date.atStartOfDay();
+LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/auth/register` | Register a user |
-| `POST` | `/api/auth/login` | Authenticate and receive a JWT |
-| `GET` | `/api/health` | Application health check |
-| `GET` | `/api/services` | List bookable services |
-| `GET` | `/api/services/{id}` | Get a service by ID |
-
-Swagger UI and the generated OpenAPI documents are also publicly accessible.
-
-### `USER` permissions
-
-A regular user can:
-
-- create a booking for themselves;
-- view only their own bookings;
-- retrieve their own booking by ID;
-- cancel their own booking.
-
-The owner is determined from the authenticated JWT. A client cannot select another user by passing a `userId` in the request body.
-
-### `ADMIN` permissions
-
-An administrator can:
-
-- create bookable services;
-- activate and deactivate services;
-- access user endpoints;
-- view all bookings;
-- confirm bookings;
-- cancel any booking;
-- delete eligible cancelled bookings.
-
-Authorization does not replace domain validation. An administrator may have permission to attempt an operation, but the domain model can still reject an invalid state transition.
-
-## API Overview
-
-### Authentication
-
-```http
-POST /api/auth/register
-POST /api/auth/login
+List<Booking> existingBookings = bookingRepository.findOverlappingBookings(
+    serviceId, dayStart, dayEnd
+);
 ```
 
-Registration example:
+The Spring Data repository excludes cancelled bookings and applies interval overlap conditions:
 
-```json
-{
-  "email": "user@example.com",
-  "password": "UserPass123!"
-}
+```java
+findByService_IdAndStatusNotAndStartTimeLessThanAndEndTimeGreaterThan(
+    serviceId,
+    BookingStatus.CANCELLED,
+    dayEnd,
+    dayStart
+);
 ```
 
-Authentication response:
+Slot conflicts are then evaluated against the fetched list in memory. This avoids repeated per-slot conflict queries during availability calculation. The optimization reduces repository calls on this path; no production latency or throughput benchmark is claimed.
 
-```json
-{
-  "accessToken": "<jwt-token>"
-}
+**Important:** The authoritative conflict check during booking creation is separate from the cached availability display. It continues to query PostgreSQL while the booking workflow holds the necessary transaction/locking protection.
+
+## Redis availability cache
+
+### Cache-Aside flow
+
+```text
+GET availability
+    |
+    v
+Check requested business date
+    |-- date not bookable --> return unavailable slots
+    |
+    v
+Read Redis
+    |-- HIT ---------------> return cached slots
+    |
+    `-- MISS / Redis error
+             |
+             v
+       Query PostgreSQL once
+             |
+             v
+       Calculate availability
+             |
+             v
+       Try to write Redis (TTL 30s)
+             |
+             v
+       Return availability
 ```
 
-Authenticated requests use:
+Cache key format:
 
-```http
-Authorization: Bearer <jwt-token>
+```text
+booking:availability:{serviceId}:{date}
 ```
-
-### Bookable Services
-
-```http
-GET  /api/services
-GET  /api/services/{id}
-POST /api/services
-PUT  /api/services/{id}/activate
-PUT  /api/services/{id}/deactivate
-```
-
-Service creation example:
-
-```json
-{
-  "name": "Backend consultation",
-  "description": "One-hour backend architecture consultation",
-  "durationMinutes": 60
-}
-```
-
-### Bookings
-
-```http
-GET    /api/bookings
-GET    /api/bookings/{id}
-POST   /api/bookings
-PUT    /api/bookings/{id}/confirm
-PUT    /api/bookings/{id}/cancel
-DELETE /api/bookings/{id}
-```
-
-Booking creation example:
-
-```json
-{
-  "serviceId": 1,
-  "startTime": "2026-08-10T10:00:00",
-  "endTime": "2026-08-10T11:00:00"
-}
-```
-
-The authenticated user becomes the owner of the booking automatically.
-
-The booking collection endpoint supports search, filtering, sorting, and pagination.
 
 Example:
 
+```text
+booking:availability:1:2026-11-02
+```
+
+The cache contains the **calculated availability slots**, not the authoritative booking records. A cache hit skips the overlapping-bookings query; other reads needed by the use case, such as loading service details, can still occur.
+
+### Invalidation after commit
+
+`TransactionalAvailabilityCacheInvalidator` registers a Spring transaction synchronization and calls `AvailabilityCache.evict(serviceId, date)` only in `afterCommit()`.
+
+- Successful booking transaction: invalidate affected cached availability.
+- Rolled-back transaction: do not invalidate as if the booking had succeeded.
+- Redis invalidation failure: log the failure without attempting to roll back an already committed database transaction.
+
+The precise cache invalidation call sites for create/cancel/reschedule should be checked against their actual v3 use cases.
+
+### Failure behavior
+
+The application handles Redis read and write failures by calculating/returning availability through PostgreSQL rather than treating the cache as a required source of truth.
+
+### Consistency model and known race condition
+
+Availability responses are **eventually consistent**. A concurrent sequence can cause a stale cache write:
+
+1. Request A misses Redis and reads the old database state.
+2. Request B commits a booking and evicts the cache.
+3. Request A finishes calculating and writes its old result into Redis.
+
+The Redis commands themselves may all succeed; the issue is their ordering across requests. A 30-second TTL bounds the lifetime of a particular stale cache entry under normal Redis expiry behavior. It does **not** guarantee that every availability response is fresh.
+
+This is an **accepted limitation** for the v3 availability display. It does not replace the transaction-protected PostgreSQL conflict check when creating a booking. The concurrency regression-style test intentionally documents the currently possible stale write, rather than claiming it has been eliminated.
+
+For stricter cache correctness, a future implementation could use generation/version checks and atomic conditional writes; that additional complexity is not part of the current design.
+
+## Booking correctness and concurrency
+
+PostgreSQL is the authoritative system for booking writes. The booking creation path obtains a pessimistic lock on the relevant service record and checks for conflicting bookings inside the transaction before saving.
+
+This protects booking creation independently of Redis cache freshness, assuming every relevant booking write follows the same locking and conflict-validation rules.
+
+The **v2 README** also described JPA optimistic locking (`@Version`) for concurrent updates. Check the corresponding v3 entities/migrations before retaining that as a verified v3 feature.
+
+## API
+
+The availability resource is exposed at:
+
 ```http
-GET /api/bookings?page=0&size=20&sortBy=startTime&direction=asc
+GET /api/services/{id}/availability
 ```
 
-A complete example request collection is available in:
+Check the v3 controller for the exact date query parameter, response schema, authentication requirements, and any other endpoints. Do not assume the v2 API contract or deployment port is unchanged.
 
-[`request.http`](request.http)
+The previous v2 project documented authentication, user/service/booking management, role-based access, OpenAPI and unified error responses. Those details can be incorporated here once verified against the current v3 API and security configuration.
 
-## OpenAPI and Swagger UI
-
-The API documentation is generated with Springdoc OpenAPI.
-
-After the application starts, the documentation is available at:
-
-```text
-Swagger UI:        http://localhost:8080/swagger-ui.html
-OpenAPI JSON:      http://localhost:8080/v3/api-docs
-OpenAPI YAML:      http://localhost:8080/v3/api-docs.yaml
-```
-
-The OpenAPI definition contains the HTTP bearer security scheme:
-
-```text
-bearerAuth
-```
-
-To call a protected endpoint from Swagger UI:
-
-1. Log in through `POST /api/auth/login`.
-2. Copy the returned access token.
-3. Click **Authorize** in Swagger UI.
-4. Paste the token without the `Bearer` prefix.
-5. Execute the protected request.
-
-Controllers document their success and error responses, including the shared `ErrorResponse` schema.
-
-## Unified Error Contract
-
-Application, validation, authentication, and authorization failures use the same response structure.
-
-Example:
-
-```json
-{
-  "timestamp": "2026-07-31T12:00:00Z",
-  "status": 400,
-  "error": "Bad Request",
-  "code": "VALIDATION_FAILED",
-  "message": "Request validation failed",
-  "path": "/api/auth/register",
-  "violations": [
-    {
-      "field": "password",
-      "message": "Password must contain between 8 and 72 characters"
-    }
-  ]
-}
-```
-
-Contract fields:
-
-| Field | Purpose |
-|---|---|
-| `timestamp` | Time when the response was created |
-| `status` | HTTP status code |
-| `error` | Standard HTTP status description |
-| `code` | Stable machine-readable API error code |
-| `message` | Human-readable error explanation |
-| `path` | Request path that produced the error |
-| `violations` | Field-level validation errors; empty for other errors |
-
-Examples of stable API error codes include:
-
-```text
-AUTHENTICATION_REQUIRED
-ACCESS_DENIED
-INVALID_CREDENTIALS
-VALIDATION_FAILED
-USER_NOT_FOUND
-SERVICE_NOT_FOUND
-BOOKING_TIME_CONFLICT
-BOOKING_CANNOT_BE_CONFIRMED
-BOOKING_CANNOT_BE_CANCELLED
-BOOKING_CANNOT_BE_DELETED
-INTERNAL_ERROR
-```
-
-The contract is verified by exception-handler, API, JWT security, and OpenAPI integration tests.
-
-## Concurrency Control
-
-Bookings use optimistic locking through a JPA `@Version` field.
-
-When two transactions attempt to update the same persisted booking version concurrently, one update may succeed while the conflicting update fails instead of silently overwriting the committed state.
-
-This protects the system from lost updates during concurrent confirmation or cancellation attempts.
-
-The behavior is covered by PostgreSQL and Testcontainers integration tests.
-
-## Database Migrations
-
-Flyway manages the database schema.
-
-Current migrations:
-
-```text
-V1__create_initial_schema.sql
-V2__add_booking_version.sql
-```
-
-Migrations are located in:
-
-```text
-booking-infrastructure/src/main/resources/db/migration
-```
-
-## Running the Project with Docker Compose
+## Running locally
 
 ### Prerequisites
 
-- Docker Desktop or another Docker-compatible runtime
-- Git
+- Java 17
+- Maven
+- Docker Desktop or another Docker-compatible runtime for PostgreSQL/Testcontainers
+- A configured PostgreSQL instance
+- Redis for exercising the actual cache path (the application has a fallback when Redis is unavailable)
 
-Java and Maven are required only when building or running the application outside Docker.
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/schloenkin/booking-system-v2.git
-cd booking-system-v2
-```
-
-### 2. Create the environment file
-
-Copy:
-
-```text
-.env.example
-```
-
-to:
-
-```text
-.env
-```
-
-PowerShell:
+From the project root:
 
 ```powershell
-Copy-Item .env.example .env
+mvn clean verify
 ```
 
-Set secure local values:
+This is the verification command used during the v3 availability and Redis work.
 
-```properties
-POSTGRES_DB=booking_db
-POSTGRES_USER=booking_user
-POSTGRES_PASSWORD=change_me
-JWT_SECRET=replace_with_a_long_random_secret_of_at_least_32_characters
-JWT_EXPIRATION_MS=3600000
-```
-
-The real `.env` file is excluded from Git.
-
-### 3. Build and start the complete application
-
-```bash
-docker compose up --build -d
-```
-
-Docker Compose starts:
-
-- PostgreSQL;
-- the Booking System API.
-
-The API waits until PostgreSQL passes its health check.
-
-### 4. Verify the containers
-
-```bash
-docker compose ps
-```
-
-Local addresses:
-
-```text
-API:               http://localhost:8080
-Health check:      http://localhost:8080/api/health
-Swagger UI:        http://localhost:8080/swagger-ui.html
-PostgreSQL:        localhost:5433
-```
-
-### 5. View application logs
-
-```bash
-docker compose logs -f booking-api
-```
-
-Press `Ctrl+C` to leave the log view without stopping the containers.
-
-### 6. Stop the application
-
-```bash
-docker compose down
-```
-
-To stop the application and delete the PostgreSQL volume:
-
-```bash
-docker compose down -v
-```
-
-The `-v` option permanently removes local database data stored in the Compose volume.
-
-## Running from IntelliJ
-
-For development outside the application container, start only PostgreSQL:
-
-```bash
-docker compose up -d postgres
-```
-
-Then run:
-
-```text
-BookingApiApplication
-```
-
-The application connects to PostgreSQL through the local port configured for development.
-
-## Creating a Local Administrator
-
-Registration creates users with the `USER` role.
-
-First register a user:
-
-```powershell
-$body = @{
-    email = "admin@example.com"
-    password = "AdminPass123!"
-} | ConvertTo-Json
-
-Invoke-RestMethod `
-    -Method Post `
-    -Uri "http://localhost:8080/api/auth/register" `
-    -ContentType "application/json" `
-    -Body $body
-```
-
-Open PostgreSQL through the Docker container:
-
-```powershell
-docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-```
-
-Promote the registered account:
-
-```sql
-UPDATE public.users
-SET role = 'ADMIN'
-WHERE email = 'admin@example.com';
-```
-
-Exit PostgreSQL:
-
-```text
-\q
-```
-
-Log in again to receive a new JWT containing the administrator role.
-
-This database role change is intended only for local demonstration and development.
+The previous v2 README contained a Docker Compose configuration and local `.env` instructions. Before publishing v3-specific `docker compose` startup commands, verify that the v3 repository contains a compatible `compose.yaml`, the required Redis service and environment variables, and any appropriate health checks. Do not copy the v2 Compose instructions without validating them.
 
 ## Testing
 
-The project contains several test levels:
+Tests created or exercised during the v3 work cover:
 
-- domain unit tests;
-- application service tests with Mockito;
-- authorization policy tests;
-- controller tests with MockMvc;
-- Spring Security tests;
-- repository integration tests;
-- PostgreSQL integration tests;
-- JWT security integration tests;
-- error-contract API tests;
-- OpenAPI integration tests;
-- concurrency and optimistic-locking tests;
-- Testcontainers-based end-to-end integration tests.
+- Cache HIT: return cached availability without querying overlapping bookings.
+- Cache MISS: load overlapping bookings once and calculate slots.
+- Overlap: one-hour booking blocks two consecutive 30-minute starts.
+- Redis read failure: calculate and return availability using PostgreSQL.
+- Redis write failure: still return the calculated result.
+- Post-commit eviction, rollback and Redis invalidation failure scenarios.
+- PostgreSQL adapter's overlapping-bookings query using Testcontainers.
+- Deterministic illustration of the accepted stale-write race using `CountDownLatch`.
+- Requests for no-longer-bookable dates bypass the availability cache.
 
-Run the full test suite with:
+Run the full build:
 
-```bash
-mvn clean install
+```powershell
+mvn clean verify
 ```
 
-Docker must be running for tests that start PostgreSQL containers.
+A successful local Maven build confirms that the configured local test suite passed. It is not, by itself, evidence of successful GitHub CI, a Docker image build, or a production deployment.
 
-The same full build can be run from the root Maven project in IntelliJ:
+## CI/CD and deployment status
 
-```text
-booking-system-v2
-`-- Lifecycle
-    |-- clean
-    `-- install
-```
+The repository for this version is:
 
-## CI/CD Pipeline
+`https://github.com/schloenkin/booking-system-v3`
 
-The project uses GitHub Actions for validation, image publishing, and deployment automation.
+The CI badge above assumes `.github/workflows/ci.yml` exists in this repository. **Verify that workflow path** before relying on the badge.
 
-### Continuous Integration
+The earlier v2 project documented:
 
-The main workflow is located at:
+- GitHub Actions verification and Docker image publishing to GHCR;
+- automated Docker Compose deployment through `booking-system-deploy` and a Windows self-hosted runner;
+- a separately managed local Kubernetes deployment.
 
-```text
-.github/workflows/ci.yml
-```
+Those are **v2 historical details**, not automatically verified v3 capabilities. If they are present and configured for v3, replace this paragraph with the actual current workflows, image tags, Compose stack and deployment steps.
 
-It runs for pushes and pull requests and verifies changes with Maven and Docker.
+## Architectural trade-offs
 
-The CI flow includes:
+| Decision | Benefit | Trade-off |
+| --- | --- | --- |
+| PostgreSQL as source of truth | Transactional booking integrity | Database participates in every authoritative write |
+| Redis Cache-Aside | Fewer repeated availability queries | Availability display may be briefly stale |
+| 30-second TTL | Short-lived cached entries | Some requests will recalculate after expiry |
+| Invalidate after commit | Avoids invalidating for rolled-back writes | Does not prevent an in-flight stale cache `PUT` |
+| Bulk overlap query | Avoids per-slot database calls | Application examines the returned booking intervals in memory |
+| Date validation before cache read | Enforces current date eligibility on ordinary requests | In-flight cross-midnight requests are not fully synchronized |
 
-1. checking out the repository;
-2. configuring Temurin Java 17;
-3. restoring the Maven dependency cache;
-4. running:
+## Future Development
 
-   ```bash
-   mvn --batch-mode --no-transfer-progress clean verify
-   ```
+Booking System v3 is designed for continuous, incremental improvement rather than being replaced by a new project version.
 
-5. building the Docker image.
+Potential future enhancements include:
 
-A change is considered verified only when the Maven build and Docker image build succeed.
+- **Apache Kafka** for event-driven communication.
+- **Kubernetes** deployment and orchestration.
+- **Observability** with metrics, monitoring, and distributed tracing.
+- **Performance testing** and load testing.
+- **Further database optimizations** and advanced concurrency scenarios.
 
-### Image Publishing and Deployment Trigger
+These improvements will be introduced when they address concrete architectural or functional requirements rather than simply increasing the number of technologies used.
 
-After changes reach `main`, the pipeline publishes a versioned Docker image to GitHub Container Registry (GHCR). The image tag is based on the Git commit SHA.
+## Project purpose
 
-The application repository then triggers the separate `booking-system-deploy` repository. The deployment repository runs on a self-hosted Windows runner and performs the Docker Compose deployment:
+Booking System v3 is a backend engineering learning and portfolio project. The focus is on understanding not only **how** to integrate infrastructure components, but **why** they are appropriate, what correctness guarantees they provide, and what limitations they introduce.
 
-```text
-booking-system-v2
-        |
-        v
-GitHub Actions
-        |
-        v
-Maven verification
-        |
-        v
-Docker image
-        |
-        v
-GHCR
-        |
-        v
-repository dispatch
-        |
-        v
-booking-system-deploy
-        |
-        v
-self-hosted runner
-        |
-        v
-docker compose pull
-        |
-        v
-docker compose up -d
-        |
-        v
-health check
-```
-
-This automated deployment path currently uses Docker Compose. Kubernetes deployment is maintained and verified separately in a local cluster.
-
-## Docker Image
-
-The project uses a multi-stage Dockerfile.
-
-The build stage:
-
-- uses Maven with Java 17;
-- builds the multi-module project;
-- packages the executable `booking-api.jar`.
-
-The runtime stage:
-
-- uses a smaller Java 17 JRE image;
-- copies only the packaged application;
-- runs the process as a non-root `booking` user;
-- exposes port `8080`.
-
-For deployment, versioned images are published to GitHub Container Registry:
-
-```text
-ghcr.io/schloenkin/booking-system-v2:<commit-sha>
-```
-
-## Kubernetes Deployment
-
-In addition to Docker Compose, the application has been deployed and verified in a local Kubernetes cluster provided by Docker Desktop.
-
-Kubernetes manifests are maintained in the separate `booking-system-deploy` repository.
-
-The local Kubernetes setup includes:
-
-- a Deployment for the Booking API;
-- a Deployment for PostgreSQL;
-- Services for the Booking API and PostgreSQL;
-- internal database connectivity through Kubernetes DNS at `postgres:5432`;
-- a ConfigMap for non-sensitive application configuration;
-- a Kubernetes Secret for sensitive values;
-- a PersistentVolumeClaim for PostgreSQL data;
-- readiness and liveness probes for the Booking API;
-- rolling application updates managed by Kubernetes Deployment.
-
-The deployment structure is:
-
-```text
-Kubernetes Cluster
-|
-|-- Booking API Deployment
-|   `-- Booking API Pod
-|       `-- Spring Boot :8080
-|
-|-- Booking API Service
-|
-|-- PostgreSQL Service
-|   `-- postgres:5432
-|
-`-- PostgreSQL Deployment
-    `-- PostgreSQL Pod
-        `-- PersistentVolumeClaim
-```
-
-The Kubernetes files are organized approximately as follows:
-
-```text
-booking-system-deploy
-`-- k8s
-    |-- deployment.yaml
-    |-- booking-service.yaml
-    |-- booking-configmap.yaml
-    |-- postgres-deployment.yaml
-    |-- postgres-service.yaml
-    `-- postgres-pvc.yaml
-```
-
-The local Secret manifest is intentionally excluded from version control.
-
-Typical verification commands include:
-
-```bash
-kubectl get deployments
-kubectl get pods
-kubectl get services
-kubectl get pvc
-kubectl rollout status deployment/booking-api
-```
-
-The Kubernetes setup is currently a local orchestration environment. The automated deployment workflow described above still deploys through Docker Compose rather than Kubernetes.
-
-## Demonstrated End-to-End Flow
-
-The application has been manually verified with the following sequence:
-
-```text
-Register user
-    ->
-Authenticate and receive JWT
-    ->
-Promote local administrator
-    ->
-Create bookable service
-    ->
-Register regular user
-    ->
-Create booking
-    ->
-Confirm booking as administrator
-    ->
-Cancel booking as owner
-    ->
-Delete cancelled booking as administrator
-    ->
-Verify that the deleted booking returns 404
-```
-
-## Design Decisions
-
-Important architectural decisions are documented under:
-
-```text
-docs/adr
-```
-
-Current ADRs:
-
-- [ADR 0001: Booking domain rules and persistence contract](docs/adr/0001-booking-domain-and-persistence-contract.md)
-
-## Project Purpose
-
-This project was built as a backend engineering portfolio project.
-
-It demonstrates practical experience with:
-
-- Java and Spring Boot backend development;
-- modular and layered architecture;
-- domain-oriented business logic;
-- REST API design;
-- authentication and authorization;
-- relational persistence;
-- database migrations;
-- concurrency control;
-- unified error-contract design;
-- OpenAPI and Swagger documentation;
-- automated testing with Testcontainers;
-- multi-stage Docker builds and Docker Compose;
-- Docker image publishing with GitHub Container Registry;
-- CI/CD automation with GitHub Actions and a self-hosted runner;
-- Kubernetes Deployments and Services;
-- Kubernetes configuration and secret management;
-- persistent storage with PersistentVolumeClaim;
-- readiness/liveness probes and rolling updates.
+The practical lessons include modular Java/Spring design, transactional PostgreSQL persistence, concurrency control, efficient querying, cache-aside behavior, graceful cache fallback, deterministic tests and explicit documentation of architectural trade-offs.
 
 ## Development workflow
 
-1. Create a separate branch for each task.
-2. Make changes and run relevant tests.
-3. Commit and push the branch to GitHub.
-4. Open a Pull Request for review.
-5. Merge after the required checks succeed.
+1. Create a task branch when appropriate.
+2. Implement the change and run focused tests.
+3. Run `mvn clean verify` from the project root.
+4. Review `git status` and `git diff`.
+5. Commit and push changes to the v3 repository.
+6. Verify the actual GitHub Actions result before claiming CI success.

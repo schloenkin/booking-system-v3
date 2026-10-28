@@ -32,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -914,6 +915,56 @@ class JpaBookingRepositoryAdapterIntegrationTest {
         assertThat(conflict)
                 .isTrue();
     }
+
+    @Test
+    void shouldFindOverlappingBookingsThroughAdapter() {
+        UserEntity user = entityManager.persistAndFlush(
+                new UserEntity(
+                        "conflict-test@example.com",
+                        "hashed-password",
+                        UserRole.USER
+                )
+        );
+
+        BookableServiceEntity service = entityManager.persistAndFlush(
+                new BookableServiceEntity(
+                        "Conflict test service",
+                        "Service for testing booking conflicts",
+                        60,
+                        true
+                )
+        );
+
+        LocalDateTime existingStartTime =
+                LocalDateTime.of(2035, 8, 5, 10, 0);
+
+        Booking existingBooking = Booking.create(
+                user.getId(),
+                service.getId(),
+                existingStartTime,
+                existingStartTime.plusMinutes(60)
+        );
+
+        Booking savedBooking =
+                bookingRepositoryAdapter.save(existingBooking);
+
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Booking> bookings =
+                bookingRepositoryAdapter.findOverlappingBookings(
+                        service.getId(),
+                        LocalDateTime.of(2035, 8, 5, 9, 0),
+                        LocalDateTime.of(2035, 8, 5, 18, 0)
+                );
+        assertThat(bookings)
+                .hasSize(1);
+
+        assertThat(bookings.get(0).getId())
+                .isEqualTo(savedBooking.getId());
+
+    }
+
 
     @Configuration
     @EnableAutoConfiguration
